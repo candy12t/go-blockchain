@@ -1,12 +1,15 @@
-package main
+package block
 
 import (
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/candy12t/go-blockchain/utils"
 )
 
 const (
@@ -34,7 +37,7 @@ func NewBlock(nonce int, previousHash [32]byte, transactions []*Transaction) *Bl
 func (b *Block) Print() {
 	fmt.Printf("timestamp        %d\n", b.timestamp)
 	fmt.Printf("nonce            %d\n", b.nonce)
-	fmt.Printf("previoush_hash   %x\n", b.previousHash)
+	fmt.Printf("previous_hash   %x\n", b.previousHash)
 	for _, t := range b.transactions {
 		t.Print()
 	}
@@ -92,9 +95,32 @@ func (bc *Blockchain) Print() {
 	fmt.Printf("%s\n", strings.Repeat("*", 25))
 }
 
-func (bc *Blockchain) AddTransaction(sender string, recipient string, value float32) {
+func (bc *Blockchain) AddTransaction(sender string, recipient string, value float32, senderPublicKey *ecdsa.PublicKey, s *utils.Signature) bool {
 	t := NewTransaction(sender, recipient, value)
-	bc.transactionPool = append(bc.transactionPool, t)
+
+	if sender == MINING_SENDER {
+		bc.transactionPool = append(bc.transactionPool, t)
+		return true
+	}
+
+	if bc.VerifyTransactionSignature(senderPublicKey, s, t) {
+		// if bc.CalculateTotalAmount(sender) < value {
+		// 	log.Println("ERROR: Not enough balance in a wallet")
+		// 	return false
+		// }
+		bc.transactionPool = append(bc.transactionPool, t)
+		return true
+	} else {
+		log.Println("ERROR: Verify Transaction")
+	}
+	return false
+}
+
+func (bc *Blockchain) VerifyTransactionSignature(
+	senderPublicKey *ecdsa.PublicKey, s *utils.Signature, t *Transaction) bool {
+	m, _ := json.Marshal(t)
+	h := sha256.Sum256([]byte(m))
+	return ecdsa.Verify(senderPublicKey, h[:], s.R, s.S)
 }
 
 func (bc *Blockchain) CopyTransactionPool() []*Transaction {
@@ -126,7 +152,7 @@ func (bc *Blockchain) ProofOfWork() int {
 }
 
 func (bc *Blockchain) Mining() bool {
-	bc.AddTransaction(MINING_SENDER, bc.blockchainAddress, MINING_REWARD)
+	bc.AddTransaction(MINING_SENDER, bc.blockchainAddress, MINING_REWARD, nil, nil)
 	nonce := bc.ProofOfWork()
 	previousHash := bc.LastBlock().Hash()
 	bc.CreateBlock(nonce, previousHash)
@@ -178,28 +204,4 @@ func (t *Transaction) MarshalJSON() ([]byte, error) {
 		Recipient: t.recipientBlockchainAddress,
 		Value:     t.value,
 	})
-}
-
-func init() {
-	log.SetPrefix("Blockchain: ")
-}
-
-func main() {
-	myBlockchainAddress := "my_blockchain_address"
-
-	blockChain := NewBlockchain(myBlockchainAddress)
-	blockChain.Print()
-
-	blockChain.AddTransaction("A", "B", 1.0)
-	blockChain.Mining()
-	blockChain.Print()
-
-	blockChain.AddTransaction("C", "D", 2.0)
-	blockChain.AddTransaction("X", "Y", 3.0)
-	blockChain.Mining()
-	blockChain.Print()
-
-	fmt.Printf("C %.1f\n", blockChain.CalculateTotalAmount("C"))
-	fmt.Printf("D %.1f\n", blockChain.CalculateTotalAmount("D"))
-	fmt.Printf("my_blockchain_address %.1f\n", blockChain.CalculateTotalAmount("my_blockchain_address"))
 }
